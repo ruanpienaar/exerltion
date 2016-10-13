@@ -1,0 +1,13 @@
+{application, exerltion,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+                  goanna
+                 ]},
+  {mod, { exerltion_app, []}},
+  {env, []}
+ ]}.
