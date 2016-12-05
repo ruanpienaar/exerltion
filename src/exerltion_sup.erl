@@ -18,7 +18,6 @@
 %% ===================================================================
 
 start_link() ->
-    data_table = ets:new(data_table, [public, named_table]),
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 %% ===================================================================
