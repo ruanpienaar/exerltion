@@ -6,16 +6,17 @@ crunch_numbers(TopXnum) ->
     TblName = list_to_atom("data_table_" ++ integer_to_list(NowSecs)),
     TblName = ets:new(TblName, [public, named_table]),
     ok = crunch_all_numbers(TblName),
-    print_sorted_top_results(TblName,TopXnum).
+    print_sorted_top_results(TblName,TopXnum),
+    TblName.
 
 crunch_all_numbers(T) ->
     case goanna_api:pull_all_traces() of
         [] ->
             ok;
         Traces ->
-            %% TODO: create counts for call, exceptins, spawns, links etc etc etc 
+            %% TODO: create counts for call, exceptins, spawns, links etc etc etc
             lists:foreach(
-                fun({_, {trace,_Pid,call,{M,F,_Args},{_,_,_}}}) ->
+                fun({_, {trace_ts,_Pid,call,{M,F,_Args},{_,_,_},_}}) ->
                     inc(T,M,F);
                 (_) ->
                     ok

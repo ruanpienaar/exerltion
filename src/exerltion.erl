@@ -1,9 +1,11 @@
 -module(exerltion).
 -export([
     start/0,
-    stop/2,
-    record/2,
-    record/3,
+    stop/1,
+    add_test_nodes/0,
+    add_node/2,
+    record/1,
+    record/4,
     clear/1
 ]).
 -include("exerltion.hrl").
@@ -24,76 +26,74 @@ start() ->
          inets,
          syntax_tools,
          sasl,
-         goldrush, lager, color, stout, hawk, goanna,
+         kakapo, hawk, goanna,
          exerltion
          ]
     ].
 
-record(Node, Cookie) ->
-    %% TODO: allow multiple nodes.......
-    record(Node, Cookie, 10*1000).
+stop(TopXnum) ->
+    error_logger:info_msg("!!!~n Exerltion STOPPING ~n!!!"),
+    TableName = exerltion_traces:crunch_numbers(TopXnum),
+    error_logger:info_msg("crunched numbers in ~p~n", [TableName]),
+    ok = goanna_api:stop_trace().
 
-record(Node, Cookie, MSecs) when is_integer(MSecs) ->
-    record(Node, Cookie, MSecs, 20).
+%%------------------------------------------------------------------------------------
+%% Record for all modules, !!! TAKE CARE !!!
 
-record(Node, Cookie, MSecs, TopXnum) when is_integer(MSecs), is_integer(TopXnum) ->
+add_test_nodes() ->
+    add_nodes([ {'test1@mbp', test},
+                {'test2@mbp', test},
+                {'test3@mbp', test},
+                {'test4@mbp', test}
+    ]).
+
+add_nodes([]) ->
+    ok;
+add_nodes([{Node, Cookie}|T]) ->
     case goanna_api:add_node(Node, Cookie, tcpip_port) of
-        {ok,_Pid} ->
-            ok;
+        {ok,_} ->
+            add_nodes(T);
         {error,{already_started,_Pid}} ->
-            ok
-    end,
-    case wait_for_nodes([Node], 10) of
-        {error, wait_too_long} ->
-            timer:apply_after(0, ?MODULE, stop, [Node, TopXnum]);
-        ok ->
-            AllMods = rpc:call(Node, code, all_loaded, []),
-            AllTraceMods = [
-                begin
-                    ExportList = rpc:call(Node, Mod, module_info, [exports]),
-                    % lists:map(fun({EFu,EAr}) -> {Mod,EFu,EAr} end, ExportList)
-                    [ {Mod,EFu,EAr} || {EFu,EAr} <- ExportList, EFu =/= module_info ]
-                end || {Mod, _Path} <- AllMods, not lists:member(Mod, sensitive_modules()) ],
-            AllTraceMods2 = lists:flatten(AllTraceMods),
-            % io:format("~p~n", [AllTraceMods2]),
-            ok = goanna_api:trace_module_function_ar(AllTraceMods2),
-            ?CRITICAL("Traces applied!"),
-            timer:apply_after(MSecs, ?MODULE, stop, [Node, TopXnum])
+            add_nodes(T)
     end.
 
-stop(Node, TopXnum) ->
-    ?DEBUG("!!!~n Exerltion STOPPING ~n!!!"),
-    ok = exerltion_traces:crunch_numbers(TopXnum),
-    goanna_api:remove_node(Node).
+add_node(Node, Cookie) ->
+    add_nodes([{Node, Cookie}]).
 
-clear(Node) ->
-    %% TODO: clear ets table..
+% nodes() ->
+%     goanna_api:nodes().
+
+record(App) ->
+    case goanna_api:nodes() of
+        [] ->
+            {error, add_nodes};
+        Nodes ->
+            record(App, node_names(Nodes), 10*1000, 100) % Top 20 functions with most calls...
+    end.
+
+node_names(Nodes) ->
+    lists:map(fun({N,C,T}) -> N end, lists:sort(Nodes)).
+
+record(App, Nodes, MSecs, TopXnum) when is_integer(MSecs) ->
+    %% Crash if the nodes are not consistent...
+    [{ Nodes, Mods }] = cluster_report:cluster_modules(App),
+    Sensitive = sensitive_modules(),
+    TraceableMods = lists:filter(fun(M) -> not lists:member(M, Sensitive) end, Mods),
+    ok = goanna_api:update_default_trace_options([{time, MSecs}, {messages, false}]),
+    ok = goanna_api:trace_modules(TraceableMods),
+    {ok,_Tref} = timer:apply_after(MSecs, ?MODULE, stop, [TopXnum]),
     ok.
 
-wait_for_nodes(Nodes, 0) ->
-    ?CRITICAL("Wait was too long, nodes haven't arrived", []),
-    {error, wait_too_long};
-wait_for_nodes(Nodes, Count) ->
-    GN = goanna_api:nodes(),
-    case length(GN)==length(Nodes) of
-        true ->
-            Pids = [ whereis(N) || [{node,N},{cookie,C},{_,_}] <- Nodes],
-            case lists:all(fun(undefined) -> false; (P) when is_pid(P) -> true end, Pids) of
-                true ->
-                    ?INFO("Nodes are alive now..~p~n", [Pids]),
-                    ok;
-                false ->
-                    wait_for_nodes(Nodes, Count-1)
-            end;
-        false ->
-            timer:sleep(50),
-            wait_for_nodes(Nodes, Count-1)
-    end.
+%%------------------------------------------------------------------------------------
+%% Record for all modules within specified application, !!! TAKE CARE !!!
 
+% record(App, Nodes) ->
+%     ok.
 
+%%------------------------------------------------------------------------------------
 
-%% Basically, excude all OTP call, for now!
-
+clear(Table) ->
+    ets:delete(Table).
 
 
 sensitive_modules() ->
